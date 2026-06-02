@@ -1,0 +1,3 @@
+// Sample Triton Intermediate Representation
+%3 = tt.addptr %1, %2 : tensor<1024x!tt.ptr<f32>>, tensor<1024xi32>
+%4 = tt.load %3 {cache = 1 : i32} : tensor<1024xf32>
