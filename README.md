@@ -22,3 +22,11 @@ Run the verifier:
 
 ## Requirements
     pip install lark z3-solver
+
+## Limitations
+
+- Strides must be provided manually via CLI for kernels with matrix arguments
+- Loop-carried pointer analysis is conservative — may not find boundary bugs in matmul
+- Numerical correctness (floating point) is out of scope
+- `scf.for` loops with complex loop-carried dependencies are partially supported
+
