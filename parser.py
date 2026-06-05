@@ -16,7 +16,8 @@ grammar = (
     "    | ptr_type\n"
     "    | int_type\n"
     "    | float_type\n"
-    "tensor_type: \"tensor\" \"<\" INT \"x\" type \">\"\n"
+    "tensor_type: \"tensor\" \"<\" INT \"x\" INT \"x\" type \">\"\n"
+    "           | \"tensor\" \"<\" INT \"x\" type \">\"\n"
     "ptr_type: \"!\" \"tt.ptr\" \"<\" type (\",\" INT)? \">\"\n"
     "int_type: /i\\d+/\n"
     "float_type: /f\\d+/\n"
@@ -28,7 +29,6 @@ grammar = (
     "%ignore /\\s+/\n"
     "%ignore /\\/\\/.*/\n"
 )
-
 parser = Lark(grammar, start="operation", parser="earley")
 
 
@@ -74,8 +74,15 @@ class MLIRTransformer(Transformer):
     def type(self, item):
         return str(item)
 
-    def tensor_type(self, size, inner_type):
-        return f"tensor<{size}x{inner_type}>"
+    def tensor_type(self, *items):
+        if len(items) == 3:
+        # 2D: tensor<MxNxT>
+            rows, cols, inner = items
+            return f"tensor<{rows}x{cols}x{inner}>"
+        else:
+        # 1D: tensor<NxT>
+            size, inner = items
+            return f"tensor<{size}x{inner}>"
 
     def ptr_type(self, *items):
         inner = items[0]

@@ -13,8 +13,7 @@ def custom_to_generic(line: str) -> str:
     if not line:
         return None
 
-    # skip structural lines
-    for prefix in ['#', 'module', '}', 'tt.func', 'tt.return', '//']:
+    for prefix in ['#', 'module', '}', 'tt.func', 'tt.return', 'scf.yield', '//']:
         if line.startswith(prefix):
             return None
 
@@ -42,7 +41,7 @@ def custom_to_generic(line: str) -> str:
         name, operand, in_type, out_type = m.groups()
         return f'{name} = "tt.splat"({operand}) : ({in_type}) -> {out_type}'
 
-    # arith.muli / arith.addi / arith.addf / arith.cmpi
+    # arith binary ops
     m = re.match(r'(%\w+)\s*=\s*(arith\.\w+)\s+(%\w+),\s*(%\w+)\s*:\s*(.+)', line)
     if m:
         name, op, a, b, typ = m.groups()
@@ -61,10 +60,10 @@ def custom_to_generic(line: str) -> str:
         name, ptr, off, ptr_type, off_type = m.groups()
         return f'{name} = "tt.addptr"({ptr}, {off}) : ({ptr_type}, {off_type}) -> {ptr_type}'
 
-    # tt.load with mask
-    m = re.match(r'(%\w+)\s*=\s*tt\.load\s+(%\w+),\s*(%\w+)\s*:\s*(.+)', line)
+    # tt.load with mask and optional other value
+    m = re.match(r'(%\w+)\s*=\s*tt\.load\s+(%\w+),\s*(%\w+)(?:,\s*(%\w+))?\s*:\s*(.+)', line)
     if m:
-        name, ptr, mask, ptr_type = m.groups()
+        name, ptr, mask, other, ptr_type = m.groups()
         result_type = re.sub(r'!tt\.ptr<(.+?)>', r'\1', ptr_type)
         if ptr_type.startswith('tensor<'):
             size = ptr_type.split('<')[1].split('x')[0]
@@ -79,6 +78,24 @@ def custom_to_generic(line: str) -> str:
         name, ptr, ptr_type = m.groups()
         result_type = re.sub(r'!tt\.ptr<(.+?)>', r'\1', ptr_type)
         return f'{name} = "tt.load"({ptr}) : ({ptr_type}) -> {result_type}'
+
+    # tt.expand_dims
+    m = re.match(r'(%\w+)\s*=\s*tt\.expand_dims\s+(%\w+)\s*\{[^}]*\}\s*:\s*(.+?)\s*->\s*(.+)', line)
+    if m:
+        name, operand, in_type, out_type = m.groups()
+        return f'{name} = "tt.expand_dims"({operand}) : ({in_type}) -> {out_type}'
+
+    # tt.broadcast
+    m = re.match(r'(%\w+)\s*=\s*tt\.broadcast\s+(%\w+)\s*:\s*(.+?)\s*->\s*(.+)', line)
+    if m:
+        name, operand, in_type, out_type = m.groups()
+        return f'{name} = "tt.broadcast"({operand}) : ({in_type}) -> {out_type}'
+
+    # scf.for
+    m = re.match(r'(%[\w:]+)\s*=\s*scf\.for\s+(%\w+)\s*=\s*(%\w+)\s*to\s*(%\w+)\s*step\s*(%\w+)\s*iter_args\((.+?)\)\s*->', line)
+    if m:
+        result, k, start, stop, step, iter_args = m.groups()
+        return f'SCFFOR {k} {start} {stop} {step} ITERARGS {iter_args}'
 
     return None
 

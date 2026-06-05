@@ -1,10 +1,12 @@
 import sys
+import re
 from lark import Lark
 from parser import grammar, MLIRTransformer
 from abstractor import tag_all
 from encoder import Encoder
 from preprocessor import preprocess
 from z3 import BitVecVal
+import math 
 
 
 def parse_ops(lines: list) -> list:
@@ -12,6 +14,8 @@ def parse_ops(lines: list) -> list:
     transformer = MLIRTransformer()
     ops = []
     for line in lines:
+        if line.startswith('SCFFOR'):
+            continue
         try:
             tree = lark_parser.parse(line)
             op = transformer.transform(tree)
@@ -21,19 +25,38 @@ def parse_ops(lines: list) -> list:
     return ops
 
 
+def extract_args(path: str) -> list:
+    with open(path) as f:
+        for line in f:
+            if 'tt.func' in line or 'func.func' in line:
+                return re.findall(r'%(\w+)\s*:', line)
+    return []
+
+
 def main():
     if len(sys.argv) < 4:
-        print("usage: python3 main.py <file.ttir> <buffer_size> <grid_size>")
+        print("usage: python3 main.py <file.ttir> <buffer_size> <grid_size> [stride]")
         print("example: python3 main.py kernel.ttir 512 4")
+        print("example: python3 main.py matmul.ttir 262144 64 512")
         sys.exit(1)
 
     mlir_file   = sys.argv[1]
     buffer_size = int(sys.argv[2])
     grid_size   = int(sys.argv[3])
+    stride      = int(sys.argv[4]) if len(sys.argv) > 4 else None
 
     # preprocess custom form → generic form
     lines = preprocess(mlir_file)
     print(f"preprocessed {len(lines)} ops")
+
+    # find loop line and index before parsing
+    loop_line = None
+    loop_idx  = None
+    for i, line in enumerate(lines):
+        if line.startswith('SCFFOR'):
+            loop_line = line
+            loop_idx  = i
+            break
 
     # parse into Op objects
     ops = parse_ops(lines)
@@ -49,33 +72,61 @@ def main():
             block_size = op.tile_size
             break
 
-    print(f"block_size={block_size}  buffer_size={buffer_size}  grid_size={grid_size}")
+    print(f"block_size={block_size}  buffer_size={buffer_size}  grid_size={grid_size}  stride={stride}")
 
     # encode and check
     enc = Encoder(block_size=block_size,
                   buffer_size=buffer_size,
                   grid_size=grid_size)
 
-    # seed all constants from arith.constant ops
+    # seed function arguments
+    args = extract_args(mlir_file)
+    matrix_dim = int(math.sqrt(buffer_size)) if stride else None 
+
+    for arg in args:
+        arg_name = f'%{arg}'
+        if 'ptr' in arg.lower():
+            # base pointers always 0
+            enc.vals[arg_name] = BitVecVal(0, 32)
+        elif stride is not None and 'stride' in arg.lower():
+            # use provided stride for all stride args
+            enc.vals[arg_name] = BitVecVal(stride, 32)
+        elif stride is not None and arg.upper() in ['M', 'N', 'K']:
+            # matrix dimension args
+            enc.vals[arg_name] = BitVecVal(stride, 32)
+        else:
+            enc.vals[arg_name] = BitVecVal(0, 32)
+    
+    # for matmul kernels with implicit stride_ak=1
+    if stride is not None:
+        enc.vals['%stride_ak'] = BitVecVal(1, 32)
+        enc.vals['%stride_bn'] = BitVecVal(1, 32)
+        enc.vals['%stride_cn'] = BitVecVal(1, 32)
+
+    # seed constants from arith.constant result names
     for op in tagged:
         if op.name == "arith.constant" and op.results:
-            # extract the value from result name e.g. %c128_i32 → 128
-            import re
             m = re.search(r'(\d+)', op.results[0])
             if m:
                 enc.vals[op.results[0]] = BitVecVal(int(m.group(1)), 32)
 
-    # seed function pointer arguments as base address 0
-    for op in tagged:
-        for operand in op.operands:
-            if operand.startswith("%x_ptr") or \
-               operand.startswith("%y_ptr") or \
-               operand.startswith("%out_ptr") or \
-               operand.startswith("%arg"):
-                if operand not in enc.vals:
-                    enc.vals[operand] = BitVecVal(0, 32)
+    # seed dense tensor constants
+    with open(mlir_file) as f:
+        for line in f:
+            m = re.match(r'\s*(%\w+)\s*=\s*arith\.constant\s+dense<(\d+)>\s*:', line)
+            if m:
+                name, val = m.groups()
+                enc.vals[name + "_min"] = BitVecVal(int(val), 32)
+                enc.vals[name + "_max"] = BitVecVal(int(val), 32)
 
-    enc.encode(tagged)
+    # encode — split at loop boundary if present
+    if loop_line is None:
+        enc.encode(tagged)
+    else:
+        pre_count = sum(1 for l in lines[:loop_idx] if not l.startswith('SCFFOR'))
+        enc.encode(tagged[:pre_count])
+        enc.encode_loop(loop_line, tagged[pre_count:])
+
     result = enc.check()
 
     print()

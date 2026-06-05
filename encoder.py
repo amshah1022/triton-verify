@@ -1,5 +1,6 @@
 from z3 import *
 from abstractor import TaggedOp
+import re
 
 
 class Encoder:
@@ -10,8 +11,12 @@ class Encoder:
         self.solver = Solver()
         self.load_ptr_max = None
         self.pid = BitVec('pid', 32)
+        self.pid1 = BitVec('pid1', 32)
+        self._pid_count = 0
         self.solver.add(self.pid >= 0)
         self.solver.add(self.pid < grid_size)
+        self.solver.add(self.pid1 >= 0)
+        self.solver.add(self.pid1 < grid_size)
         self.vals = {}
 
     def encode(self, ops):
@@ -23,16 +28,29 @@ class Encoder:
         res = op.results[0] if op.results else None
 
         if name == "tt.get_program_id":
-            self.vals[res] = self.pid
+            if self._pid_count == 0:
+                self.vals[res] = self.pid
+            else:
+                self.vals[res] = self.pid1
+            self._pid_count += 1
 
         elif name == "arith.constant":
             pass
 
         elif name == "arith.muli":
-            a = self._get(op.operands[0])
-            b = self._get(op.operands[1])
-            if a is not None and b is not None:
-                self.vals[res] = a * b
+            if op.is_tile:
+                a_min = self._get(op.operands[0] + "_min")
+                a_max = self._get(op.operands[0] + "_max")
+                b_min = self._get(op.operands[1] + "_min")
+                b_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [a_min, a_max, b_min, b_max]):
+                    self.vals[res + "_min"] = a_min * b_min
+                    self.vals[res + "_max"] = a_max * b_max
+            else:
+                a = self._get(op.operands[0])
+                b = self._get(op.operands[1])
+                if a is not None and b is not None:
+                    self.vals[res] = a * b
 
         elif name == "arith.addi":
             if op.is_tile:
@@ -63,6 +81,8 @@ class Encoder:
                 off = self._get(op.operands[1])
                 if ptr is not None and off is not None:
                     self.vals[res] = ptr + off
+                elif ptr is not None:
+                    self.vals[res] = ptr
 
         elif name == "tt.make_range":
             self.vals[res + "_min"] = BitVecVal(0, 32)
@@ -80,6 +100,25 @@ class Encoder:
                     self.vals[res + "_min"] = val_min
                     self.vals[res + "_max"] = val_max
 
+        elif name == "tt.expand_dims":
+            val_min = self._get(op.operands[0] + "_min")
+            val_max = self._get(op.operands[0] + "_max")
+            if val_min is not None:
+                self.vals[res + "_min"] = val_min
+                self.vals[res + "_max"] = val_max
+            else:
+                val = self._get(op.operands[0])
+                if val is not None:
+                    self.vals[res + "_min"] = val
+                    self.vals[res + "_max"] = val
+
+        elif name == "tt.broadcast":
+            val_min = self._get(op.operands[0] + "_min")
+            val_max = self._get(op.operands[0] + "_max")
+            if val_min is not None:
+                self.vals[res + "_min"] = val_min
+                self.vals[res + "_max"] = val_max
+
         elif name == "tt.load":
             if op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
@@ -89,6 +128,59 @@ class Encoder:
     def _get(self, name):
         return self.vals.get(name, None)
 
+    def encode_loop(self, loop_line: str, body_ops: list):
+        m = re.match(r'SCFFOR (\S+) (\S+) (\S+) (\S+) ITERARGS (.+)', loop_line)
+        if not m:
+            return
+        k, start, stop, step, iter_args = m.groups()
+
+        start_val = self._get(start)
+        if start_val is None:
+            start_val = BitVecVal(0, 32)
+
+        stop_val = self._get(stop)
+        if stop_val is None:
+            stop_val = BitVecVal(512, 32)
+
+        step_val = self._get(step)
+        if step_val is None:
+            step_val = BitVecVal(32, 32)
+
+        num_iters = (stop_val - start_val) / step_val
+
+        iter_map = {}
+        for arg_pair in iter_args.split(','):
+            arg_pair = arg_pair.strip()
+            m2 = re.match(r'(%\w+)\s*=\s*(%\w+)', arg_pair)
+            if m2:
+                loop_var, init_val = m2.groups()
+                iter_map[loop_var] = init_val
+                init_min = self._get(init_val + "_min")
+                init_max = self._get(init_val + "_max")
+                if init_min is not None:
+                    self.vals[loop_var + "_min"] = init_min
+                    self.vals[loop_var + "_max"] = init_max
+
+        for op in body_ops:
+            self._encode_op(op)
+
+        for op in body_ops:
+            if op.name == "tt.addptr" and op.is_tile:
+                ptr_operand = op.operands[0]
+                if ptr_operand in iter_map:
+                    init_val = iter_map[ptr_operand]
+                    off_max = self._get(op.operands[1] + "_max")
+                    init_max = self._get(init_val + "_max")
+                    if off_max is not None and init_max is not None:
+                        final_max = init_max + num_iters * off_max
+                        self.vals[ptr_operand + "_max"] = final_max
+
+        for op in body_ops:
+            if op.name == "tt.load" and op.operands:
+                ptr_max = self._get(op.operands[0] + "_max")
+                if ptr_max is not None:
+                    self.load_ptr_max = ptr_max
+
     def check(self):
         if self.load_ptr_max is None:
             return {"safe": True, "reason": "no load found"}
@@ -96,21 +188,25 @@ class Encoder:
         self.solver.push()
         self.solver.add(self.load_ptr_max >= self.buffer_size)
         result = self.solver.check()
-        
 
         if result == sat:
             m = self.solver.model()
             self.solver.pop()
             pid_val = m[self.pid].as_long()
+            # evaluate the actual max offset from the model
+            offset_val = m.eval(self.load_ptr_max)
+            try:
+                offset_int = offset_val.as_long()
+            except:
+                offset_int = pid_val * self.block_size + self.block_size - 1
             return {
                 "safe": False,
                 "pid": pid_val,
-                "offset_max": pid_val * self.block_size + self.block_size - 1
+                "offset_max": offset_int
             }
-        self.solver.pop()
         if result == unsat:
             return {"safe": True}
-   
+
         for pid_val in range(32):
             self.solver.push()
             self.solver.add(self.pid == pid_val)
