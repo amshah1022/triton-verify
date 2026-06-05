@@ -10,6 +10,7 @@ class Encoder:
         self.buffer_size = buffer_size
         self.solver = Solver()
         self.load_ptr_max = None
+        self.all_load_maxima = []
         self.pid = BitVec('pid', 32)
         self.pid1 = BitVec('pid1', 32)
         self._pid_count = 0
@@ -123,7 +124,7 @@ class Encoder:
             if op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
                 if ptr_max is not None:
-                    self.load_ptr_max = ptr_max
+                    self.all_load_maxima.append(ptr_max)
 
     def _get(self, name):
         return self.vals.get(name, None)
@@ -146,7 +147,14 @@ class Encoder:
         if step_val is None:
             step_val = BitVecVal(32, 32)
 
-        num_iters = (stop_val - start_val) / step_val
+        try:
+            if hasattr(stop_val, 'as_long') and hasattr(start_val, 'as_long') and hasattr(step_val, 'as_long'):
+                num_iters = (stop_val.as_long() - start_val.as_long()) // step_val.as_long()
+                num_iters = BitVecVal(num_iters, 32)
+            else:
+                num_iters = (stop_val - start_val) / step_val
+        except:
+            num_iters = (stop_val - start_val) / step_val
 
         iter_map = {}
         for arg_pair in iter_args.split(','):
@@ -179,47 +187,54 @@ class Encoder:
             if op.name == "tt.load" and op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
                 if ptr_max is not None:
-                    self.load_ptr_max = ptr_max
+                    self.all_load_maxima.append(ptr_max)
 
     def check(self):
-        if self.load_ptr_max is None:
+        candidates = self.all_load_maxima[:]
+        if self.load_ptr_max is not None:
+            candidates.append(self.load_ptr_max)
+
+        if not candidates:
             return {"safe": True, "reason": "no load found"}
 
-        self.solver.push()
-        self.solver.add(self.load_ptr_max >= self.buffer_size)
-        result = self.solver.check()
-
-        if result == sat:
-            m = self.solver.model()
-            self.solver.pop()
-            pid_val = m[self.pid].as_long()
-            # evaluate the actual max offset from the model
-            offset_val = m.eval(self.load_ptr_max)
-            try:
-                offset_int = offset_val.as_long()
-            except:
-                offset_int = pid_val * self.block_size + self.block_size - 1
-            return {
-                "safe": False,
-                "pid": pid_val,
-                "offset_max": offset_int
-            }
-        if result == unsat:
-            return {"safe": True}
-
-        for pid_val in range(32):
+        for ptr_max in candidates:
             self.solver.push()
-            self.solver.add(self.pid == pid_val)
-            self.solver.add(self.load_ptr_max >= self.buffer_size)
-            r = self.solver.check()
-            self.solver.pop()
-            if r == sat:
+            self.solver.add(ptr_max >= self.buffer_size)
+            result = self.solver.check()
+
+            if result == sat:
+                m = self.solver.model()
+                self.solver.pop()
+                pid_val = m[self.pid].as_long()
+                try:
+                    offset_int = m.eval(ptr_max).as_long()
+                except:
+                    offset_int = pid_val * self.block_size + self.block_size - 1
                 return {
                     "safe": False,
                     "pid": pid_val,
-                    "offset_max": pid_val * self.block_size + self.block_size - 1
+                    "offset_max": offset_int
                 }
-        return {"safe": True, "reason": "unknown — checked first 32 pids"}
+
+            self.solver.pop()
+
+            if result == unsat:
+                continue
+
+            for pid_val in range(32):
+                self.solver.push()
+                self.solver.add(self.pid == pid_val)
+                self.solver.add(ptr_max >= self.buffer_size)
+                r = self.solver.check()
+                self.solver.pop()
+                if r == sat:
+                    return {
+                        "safe": False,
+                        "pid": pid_val,
+                        "offset_max": pid_val * self.block_size + self.block_size - 1
+                    }
+
+        return {"safe": True}
 
 
 if __name__ == "__main__":

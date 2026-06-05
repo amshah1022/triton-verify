@@ -40,7 +40,16 @@ def custom_to_generic(line: str) -> str:
     if m:
         name, operand, in_type, out_type = m.groups()
         return f'{name} = "tt.splat"({operand}) : ({in_type}) -> {out_type}'
-
+    # arith.cmpi (has predicate: slt, sgt, eq, etc.)
+    m = re.match(r'(%\w+)\s*=\s*arith\.cmpi\s+\w+,\s*(%\w+),\s*(%\w+)\s*:\s*(.+)', line)
+    if m:
+        name, a, b, typ = m.groups()
+        if typ.startswith('tensor<'):
+            size = typ.split('<')[1].split('x')[0]
+            ret_type = f'tensor<{size}xi1>'
+        else:
+            ret_type = 'i1'
+        return f'{name} = "arith.cmpi"({a}, {b}) : ({typ}, {typ}) -> {ret_type}'
     # arith binary ops
     m = re.match(r'(%\w+)\s*=\s*(arith\.\w+)\s+(%\w+),\s*(%\w+)\s*:\s*(.+)', line)
     if m:
