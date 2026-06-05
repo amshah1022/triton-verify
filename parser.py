@@ -1,178 +1,106 @@
-import os
-from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
-from lark import Lark, Transformer
+from lark import Lark, Transformer, v_args
+from dataclasses import dataclass, field
 
-# =====================================================================
-# 1. THE DATA MODEL (The Abstract Syntax Tree Node)
-# =====================================================================
+grammar = (
+    "program: operation+\n"
+    "operation: (result_list \"=\")? OP_NAME"
+    " \"(\" operand_list \")\""
+    " attr_dict?"
+    " \":\" func_type\n"
+    "result_list: VALUE_ID (\",\" VALUE_ID)*\n"
+    "operand_list: (VALUE_ID (\",\" VALUE_ID)*)?\n"
+    "func_type: \"(\" type_list \")\" \"->\" type\n"
+    "         | \"(\" type_list \")\" \"->\" \"(\" type_list \")\"\n"
+    "type_list: (type (\",\" type)*)?\n"
+    "type: tensor_type\n"
+    "    | ptr_type\n"
+    "    | int_type\n"
+    "    | float_type\n"
+    "tensor_type: \"tensor\" \"<\" INT \"x\" type \">\"\n"
+    "ptr_type: \"!\" \"tt.ptr\" \"<\" type (\",\" INT)? \">\"\n"
+    "int_type: /i\\d+/\n"
+    "float_type: /f\\d+/\n"
+    "attr_dict: \"{\" attr_content* \"}\"\n"
+    "attr_content: /[^{}]+/ | \"{\" attr_content* \"}\"\n"
+    "OP_NAME: \"\\\"\" /[a-zA-Z0-9_.]+/ \"\\\"\"\n"
+    "VALUE_ID: \"%\" /[a-zA-Z0-9_]+/\n"
+    "INT: /\\d+/\n"
+    "%ignore /\\s+/\n"
+    "%ignore /\\/\\/.*/\n"
+)
+
+parser = Lark(grammar, start="operation", parser="earley")
+
+
 @dataclass
-class TritonInstruction:
-    output_var: Optional[str]   
-    op_name: str                
-    arguments: List[str]        
-    attributes: Dict[str, Any]  
-    data_type: str              
+class Op:
+    name: str
+    results: list
+    operands: list
+    result_type: str
 
+@v_args(inline=True)
+class MLIRTransformer(Transformer):
 
-# =====================================================================
-# 2. THE FINAL EBNF GRAMMAR SPECIFICATION
-# =====================================================================
-GRAMMAR = r"""
-    ?start: instruction
-    
-    ?instruction: ssa_assignment | bare_instruction
-    
-    ssa_assignment: ssa_id "=" op_name [arg_list] [attr_dict] ":" type_signature
-    bare_instruction: op_name [arg_list] [attr_dict] ":" type_signature
-    
-    arg_list: value_item ("," value_item)*
-    ?value_item: ssa_id | INT | DECIMAL | SIGNED_INT | CNAME
-    
-    attr_dict: "{" attr_entry ("," attr_entry)* "}"
-    attr_entry: CNAME "=" attr_value
-    
-    # ADDED '?' HERE: This automatically flattens out the leaked Lark Tree
-    ?attr_value: /[^,}]+/
-    
-    ssa_id: "%" (CNAME | INT)
-    op_name: CNAME ("." CNAME)+
-    type_signature: /.+/
-    
-    %import common.CNAME
-    %import common.INT
-    %import common.DECIMAL
-    %import common.SIGNED_INT
-    %import common.ESCAPED_STRING
-    %import common.WS
-    %ignore WS
-"""
+    def operation(self, *items):
+        name = None
+        results = []
+        operands = []
+        result_type = None
 
+        for item in items:
+            if isinstance(item, tuple) and item[0] == "results":
+                results = item[1]
+            elif isinstance(item, tuple) and item[0] == "operands":
+                operands = item[1]
+            elif isinstance(item, tuple) and item[0] == "type":
+                result_type = item[1]
+            elif isinstance(item, str) and item.startswith('"'):
+                name = item.strip('"')
 
-# =====================================================================
-# 3. THE TREE TRANSFORMER
-# =====================================================================
-class TritonTransformer(Transformer):
-    def ssa_id(self, children):
-        return f"%{children[0]}"
-        
-    def op_name(self, children):
-        return ".".join(str(c) for c in children)
-        
-    def type_signature(self, children):
-        return str(children[0]).strip()
-        
-    def arg_list(self, children):
-        return [str(c) for c in children]
-        
-    def attr_entry(self, children):
-        return {str(children[0]): str(children[1]).strip()}
-        
-    def attr_dict(self, children):
-        res = {}
-        for c in children:
-            res.update(c)
-        return res
+        return Op(name=name, results=results,
+                  operands=operands, result_type=result_type)
 
-    def ssa_assignment(self, children):
-        output_var = children[0]
-        op_name = children[1]
-        
-        args = []
-        attrs = {}
-        dtype = ""
-        
-        for c in children[2:]:
-            if isinstance(c, list):
-                args = c
-            elif isinstance(c, dict):
-                attrs = c
-            else:
-                dtype = str(c)
-                
-        return TritonInstruction(
-            output_var=output_var,
-            op_name=op_name,
-            arguments=args,
-            attributes=attrs,
-            data_type=dtype
-        )
+    def result_list(self, *items):
+        return ("results", [str(i) for i in items])
 
-    def bare_instruction(self, children):
-        op_name = children[0]
-        
-        args = []
-        attrs = {}
-        dtype = ""
-        
-        for c in children[1:]:
-            if isinstance(c, list):
-                args = c
-            elif isinstance(c, dict):
-                attrs = c
-            else:
-                dtype = str(c)
-                
-        return TritonInstruction(
-            output_var=None,
-            op_name=op_name,
-            arguments=args,
-            attributes=attrs,
-            data_type=dtype
-        )
+    def operand_list(self, *items):
+        return ("operands", [str(i) for i in items])
 
+    def func_type(self, *items):
+        # last item is the return type
+        return ("type", str(items[-1]))
 
-# =====================================================================
-# 4. THE INGESTION ENGINE INTERFACE
-# =====================================================================
-class TritonIRParser:
-    def __init__(self):
-        self.lark_engine = Lark(GRAMMAR, parser='earley')
-        self.transformer = TritonTransformer()
+    def type(self, item):
+        return str(item)
 
-    def parse_line(self, line: str) -> Optional[TritonInstruction]:
-        line = line.strip()
-        if not line or line.startswith("//") or line.startswith("module") or line.startswith("}") or line == "{":
-            return None
-            
-        if "loc(#" in line:
-            line = line.split("loc(#")[0].strip()
-            
-        try:
-            raw_tree = self.lark_engine.parse(line)
-            return self.transformer.transform(raw_tree)
-        except Exception as e:
-            print(f"[Parser Warning] Skipping unmapped/structural line: {line}")
-            return None
+    def tensor_type(self, size, inner_type):
+        return f"tensor<{size}x{inner_type}>"
 
-    def parse_file(self, filepath: str) -> List[TritonInstruction]:
-        instructions = []
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Target IR file not found at: {filepath}")
-            
-        with open(filepath, 'r') as f:
-            for line in f:
-                parsed_op = self.parse_line(line)
-                if parsed_op:
-                    instructions.append(parsed_op)
-        return instructions
+    def ptr_type(self, *items):
+        inner = items[0]
+        if len(items) > 1:
+            return f"!tt.ptr<{inner}, {items[1]}>"
+        return f"!tt.ptr<{inner}>"
 
+    def int_type(self, item):
+        return str(item)
 
-# =====================================================================
-# 5. DIAGNOSTIC VERIFICATION HOOK
-# =====================================================================
-if __name__ == "__main__":
-    print("Initializing Lark Engine Diagnostic Pipeline...")
-    parser = TritonIRParser()
-    
-    line_1 = "%3 = tt.addptr %1, %2 : tensor<1024x!tt.ptr<f32>>, tensor<1024xi32>"
-    res_1 = parser.parse_line(line_1)
-    print(f"\nParse Check 1:\n{res_1}")
-    
-    line_2 = "%4 = tt.load %3 {cache = 1 : i32} : tensor<1024xf32>"
-    res_2 = parser.parse_line(line_2)
-    print(f"\nParse Check 2:\n{res_2}")
-    
-    line_3 = "tt.store %ptr, %val : tensor<1024x!tt.ptr<f32>>"
-    res_3 = parser.parse_line(line_3)
-    print(f"\nParse Check 3:\n{res_3}")
+    def float_type(self, item):
+        return str(item)
+
+    def type_list(self, *items):
+        return list(items)
+
+    def attr_dict(self, *items):
+        return None   # ignore attrs for now
+
+    def VALUE_ID(self, token):
+        return str(token)
+
+    def OP_NAME(self, token):
+        return str(token)
+
+    def INT(self, token):
+        return str(token)
+

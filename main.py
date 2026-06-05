@@ -1,47 +1,103 @@
 import sys
-import os
-from parser import TritonIRParser
-from encoder import TritonZ3Encoder
+import re
+from lark import Lark
+from parser import grammar, MLIRTransformer, Op
+from abstractor import tag_all
+from encoder import Encoder
+from z3 import BitVecVal
 
-def run_verification(filepath: str):
-    print(f"=== Starting Triton Verification Pipeline ===")
-    print(f"Target File: {filepath}\n")
-    
-    # 1. Initialize our isolated system layers
-    parser = TritonIRParser()
-    encoder = TritonZ3Encoder()
-    
-    # 2. Layer 1: Parse the file into structured AST nodes
-    print("[Pipeline] Step 1: Parsing raw text IR...")
-    try:
-        instructions = parser.parse_file(filepath)
-        print(f"[Pipeline] Successfully parsed {len(instructions)} instructions.\n")
-    except Exception as e:
-        print(f"Parsing Error: {e}")
-        return
 
-    # 3. Layer 2 & 3: Translate instructions into Z3 equations
-    print("[Pipeline] Step 2: Translating nodes into SMT equations...")
-    for inst in instructions:
-        encoder.encode_instruction(inst)
-        
-    # 4. Layer 4: Execute the solver pass
-    encoder.verify()
+def extract_ops(mlir_text: str) -> list:
+    # grab everything between the outermost { }
+    match = re.search(r'\{(.*)\}', mlir_text, re.DOTALL)
+    if not match:
+        print("ERROR: could not find function body in .mlir file")
+        sys.exit(1)
+    body = match.group(1).strip()
+    # split into individual lines, skip empty lines
+    lines = [l.strip() for l in body.splitlines() if l.strip()]
+    return lines
+
+
+def parse_ops(lines: list) -> list:
+    lark_parser = Lark(grammar, start="operation", parser="earley")
+    transformer = MLIRTransformer()
+    ops = []
+    for line in lines:
+        try:
+            tree = lark_parser.parse(line)
+            op = transformer.transform(tree)
+            ops.append(op)
+        except Exception:
+            # skip lines that don't match generic op form
+            # (function signatures, block labels, tt.return, etc.)
+            pass
+    return ops
+
+
+def main():
+    if len(sys.argv) < 4:
+        print("usage: python3 main.py <file.mlir> <buffer_size> <grid_size>")
+        print("example: python3 main.py kernel.mlir 512 4")
+        sys.exit(1)
+
+    mlir_file   = sys.argv[1]
+    buffer_size = int(sys.argv[2])
+    grid_size   = int(sys.argv[3])
+
+    # read file
+    with open(mlir_file) as f:
+        mlir_text = f.read()
+
+    # extract op lines from function body
+    lines = extract_ops(mlir_text)
+    print(f"found {len(lines)} lines in kernel body")
+
+    # parse into Op objects
+    ops = parse_ops(lines)
+    print(f"parsed {len(ops)} ops")
+
+    # tag scalar vs tile
+    tagged = tag_all(ops)
+
+    # find block size from tt.make_range
+    block_size = 128  # default
+    for op in tagged:
+        if op.is_tile and op.tile_size > 0:
+            block_size = op.tile_size
+            break
+    print(f"block_size={block_size}  buffer_size={buffer_size}  grid_size={grid_size}")
+
+    # encode and check
+    enc = Encoder(block_size=block_size,
+                  buffer_size=buffer_size,
+                  grid_size=grid_size)
+
+    # seed function arguments as symbolic base pointer at 0
+    for op in tagged:
+        for operand in op.operands:
+            if operand.startswith("%arg"):
+                enc.vals[operand] = BitVecVal(0, 32)
+
+    # seed any constants that look like the block size
+    for op in tagged:
+        if op.name == "arith.constant":
+            # name the constant after its result
+            enc.vals[op.results[0]] = BitVecVal(block_size, 32)
+
+    enc.encode(tagged)
+    result = enc.check()
+
+    print()
+    if result.get("safe"):
+        print("SAFE: no out-of-bounds access possible for any program id")
+    else:
+        print("BUG FOUND:")
+        print(f"  pid        = {result['pid']}")
+        print(f"  offset_max = {result['offset_max']}")
+        print(f"  buffer_size= {buffer_size}")
+        print(f"  overflow by= {result['offset_max'] - buffer_size + 1} elements")
+
 
 if __name__ == "__main__":
-    # If a user provides a file via command line, use it. Otherwise, look for 'kernel.ttir'
-    target_file = sys.argv[1] if len(sys.argv) > 1 else "kernel.ttir"
-    
-    if not os.path.exists(target_file):
-        print(f"Error: Could not find target file '{target_file}' to verify.")
-        print("Creating a sample 'kernel.ttir' for you right now...")
-        
-        # Generating a sample multi-line file to test the full pipeline
-        with open(target_file, "w") as f:
-            f.write("// Sample Triton Intermediate Representation\n")
-            f.write("%3 = tt.addptr %1, %2 : tensor<1024x!tt.ptr<f32>>, tensor<1024xi32>\n")
-            f.write("%4 = tt.load %3 {cache = 1 : i32} : tensor<1024xf32>\n")
-            
-        print(f"Sample file created. Re-running pipeline...\n")
-        
-    run_verification(target_file)
+    main()

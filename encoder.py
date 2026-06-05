@@ -1,71 +1,155 @@
-import z3
-from parser import TritonInstruction
+from z3 import *
+from abstractor import TaggedOp
 
-class TritonZ3Encoder:
-    def __init__(self):
-        self.symbol_table = {}
-        self.solver = z3.Solver()
-        self.MAX_BUFFER_SIZE = 1024
 
-    def _get_or_create_var(self, name: str) -> z3.BitVecRef:
-        if name not in self.symbol_table:
-            clean_name = name.replace("%", "")
-            self.symbol_table[name] = z3.BitVec(clean_name, 64)
-        return self.symbol_table[name]
+class Encoder:
 
-    def encode_instruction(self, inst: TritonInstruction):
-        if inst.op_name == "tt.addptr":
-            base_ptr = self._get_or_create_var(inst.arguments[0])
-            offset = self._get_or_create_var(inst.arguments[1])
-            result_ptr = base_ptr + offset
-            self.symbol_table[inst.output_var] = result_ptr
-            print(f"[Encoder] Modeled address generation for {inst.output_var}")
+    def __init__(self, block_size, buffer_size, grid_size):
+        self.block_size = block_size
+        self.buffer_size = buffer_size
+        self.solver = Solver()
+        self.load_ptr_max = None
+        self.pid = BitVec('pid', 32)
+        self.solver.add(self.pid >= 0)
+        self.solver.add(self.pid < grid_size)
+        self.vals = {}
 
-        # 2. Handle Memory Loading (Looking for bugs!)
-        elif inst.op_name == "tt.load":
-            source_ptr = self._get_or_create_var(inst.arguments[0])
-            
-            # BUG HUNTING MODE: Tell Z3 to find a state where the pointer is OUT of bounds (>= 1024)
-            self.solver.add(z3.UGE(source_ptr, self.MAX_BUFFER_SIZE))
-            
-            data_reg = self._get_or_create_var(inst.output_var)
-            print(f"[Encoder] Added vulnerability check for loading {inst.output_var}")
+    def encode(self, ops):
+        for op in ops:
+            self._encode_op(op)
 
-        # 3. Handle Memory Storing (Looking for bugs!)
-        elif inst.op_name == "tt.store":
-            dest_ptr = self._get_or_create_var(inst.arguments[0])
-            value = self._get_or_create_var(inst.arguments[1])
-            
-            # BUG HUNTING MODE: Tell Z3 to find a state where the store is OUT of bounds (>= 1024)
-            self.solver.add(z3.UGE(dest_ptr, self.MAX_BUFFER_SIZE))
-            print(f"[Encoder] Added vulnerability check for store operation to {inst.arguments[0]}")
+    def _encode_op(self, op):
+        name = op.name
+        res = op.results[0] if op.results else None
 
-    def verify(self):
-        print("\n--- Initiating Z3 Mathematical Verification Pass ---")
+        if name == "tt.get_program_id":
+            self.vals[res] = self.pid
+
+        elif name == "arith.constant":
+            pass
+
+        elif name == "arith.muli":
+            a = self._get(op.operands[0])
+            b = self._get(op.operands[1])
+            if a is not None and b is not None:
+                self.vals[res] = a * b
+
+        elif name == "arith.addi":
+            if op.is_tile:
+                a_min = self._get(op.operands[0] + "_min")
+                a_max = self._get(op.operands[0] + "_max")
+                b_min = self._get(op.operands[1] + "_min")
+                b_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [a_min, a_max, b_min, b_max]):
+                    self.vals[res + "_min"] = a_min + b_min
+                    self.vals[res + "_max"] = a_max + b_max
+            else:
+                a = self._get(op.operands[0])
+                b = self._get(op.operands[1])
+                if a is not None and b is not None:
+                    self.vals[res] = a + b
+
+        elif name == "tt.addptr":
+            if op.is_tile:
+                ptr_min = self._get(op.operands[0] + "_min")
+                ptr_max = self._get(op.operands[0] + "_max")
+                off_min = self._get(op.operands[1] + "_min")
+                off_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [ptr_min, ptr_max, off_min, off_max]):
+                    self.vals[res + "_min"] = ptr_min + off_min
+                    self.vals[res + "_max"] = ptr_max + off_max
+            else:
+                ptr = self._get(op.operands[0])
+                off = self._get(op.operands[1])
+                if ptr is not None and off is not None:
+                    self.vals[res] = ptr + off
+
+        elif name == "tt.make_range":
+            self.vals[res + "_min"] = BitVecVal(0, 32)
+            self.vals[res + "_max"] = BitVecVal(self.block_size - 1, 32)
+
+        elif name == "tt.splat":
+            val = self._get(op.operands[0])
+            if val is not None:
+                self.vals[res + "_min"] = val
+                self.vals[res + "_max"] = val
+            else:
+                val_min = self._get(op.operands[0] + "_min")
+                val_max = self._get(op.operands[0] + "_max")
+                if val_min is not None:
+                    self.vals[res + "_min"] = val_min
+                    self.vals[res + "_max"] = val_max
+
+        elif name == "tt.load":
+            if op.operands:
+                ptr_max = self._get(op.operands[0] + "_max")
+                if ptr_max is not None:
+                    self.load_ptr_max = ptr_max
+
+    def _get(self, name):
+        return self.vals.get(name, None)
+
+    def check(self):
+        if self.load_ptr_max is None:
+            return {"safe": True, "reason": "no load found"}
+
+        self.solver.push()
+        self.solver.add(self.load_ptr_max >= self.buffer_size)
         result = self.solver.check()
         
-        # If SAT, it means Z3 successfully found a way to trigger the violation we added above!
-        if result == z3.sat:
-            print("❌ SECURITY VULNERABILITY FOUND!")
-            print("Z3 found a valid state where memory boundaries could be breached.")
-            print("Counterexample context mapping:")
-            print(self.solver.model())
-        else:
-            print("✅ VERIFICATION SUCCESSFUL: No out-of-bounds risks detected for this block configuration.")
+
+        if result == sat:
+            m = self.solver.model()
+            self.solver.pop()
+            pid_val = m[self.pid].as_long()
+            return {
+                "safe": False,
+                "pid": pid_val,
+                "offset_max": pid_val * self.block_size + self.block_size - 1
+            }
+        self.solver.pop()
+        if result == unsat:
+            return {"safe": True}
+   
+        for pid_val in range(32):
+            self.solver.push()
+            self.solver.add(self.pid == pid_val)
+            self.solver.add(self.load_ptr_max >= self.buffer_size)
+            r = self.solver.check()
+            self.solver.pop()
+            if r == sat:
+                return {
+                    "safe": False,
+                    "pid": pid_val,
+                    "offset_max": pid_val * self.block_size + self.block_size - 1
+                }
+        return {"safe": True, "reason": "unknown — checked first 32 pids"}
 
 
 if __name__ == "__main__":
-    encoder = TritonZ3Encoder()
-    
-    step_1 = TritonInstruction(output_var='%3', op_name='tt.addptr', arguments=['%1', '%2'], attributes={}, data_type='')
-    step_2 = TritonInstruction(output_var='%4', op_name='tt.load', arguments=['%3'], attributes={'cache': '1 : i32'}, data_type='')
-    
-    print("Feeding parsed instructions to the mathematical encoder...")
-    encoder.encode_instruction(step_1)
-    encoder.encode_instruction(step_2)
-    
-    print("\nSimulating an adversarial input constraint (%2 = 2000)...")
-    encoder.solver.add(encoder.symbol_table['%2'] == 2000)
-    encoder.solver.add(encoder.symbol_table['%1'] == 0) 
-    
-    encoder.verify()
+
+    ops = [
+        TaggedOp("tt.get_program_id", ["%0"], [],              "i32",                     False, 0),
+        TaggedOp("arith.muli",        ["%1"], ["%0", "%c128"], "i32",                     False, 0),
+        TaggedOp("tt.make_range",     ["%2"], [],              "tensor<128xi32>",          True,  128),
+        TaggedOp("tt.splat",          ["%3"], ["%1"],          "tensor<128xi32>",          True,  128),
+        TaggedOp("arith.addi",        ["%4"], ["%3", "%2"],    "tensor<128xi32>",          True,  128),
+        TaggedOp("tt.splat",          ["%7"], ["%arg0"],       "tensor<128x!tt.ptr<f32>>", True,  128),
+        TaggedOp("tt.addptr",         ["%8"], ["%7", "%4"],    "tensor<128x!tt.ptr<f32>>", True,  128),
+        TaggedOp("tt.load",           ["%9"], ["%8"],          "tensor<128xf32>",          True,  128),
+    ]
+
+    print("=== TEST 1: safe (512 elements, 4 blocks) ===")
+    enc = Encoder(block_size=128, buffer_size=512, grid_size=4)
+    enc.vals["%arg0"] = BitVecVal(0, 32)
+    enc.vals["%c128"] = BitVecVal(128, 32)
+    enc.encode(ops)
+    print(enc.check())
+
+    print()
+    print("=== TEST 2: buggy (500 elements, 4 blocks) ===")
+    enc2 = Encoder(block_size=128, buffer_size=500, grid_size=4)
+    enc2.vals["%arg0"] = BitVecVal(0, 32)
+    enc2.vals["%c128"] = BitVecVal(128, 32)
+    enc2.encode(ops)
+    print(enc2.check())
