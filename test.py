@@ -14,6 +14,8 @@ tests = [
     ("layernorm.ttir",     60000,  128,    512, "BUG FOUND"),
     ("flash_attn.ttir",    2048,    4,     32, "SAFE"),
     ("flash_attn.ttir",    2000,    4,     32, "BUG FOUND"),
+    ("matmul.ttir", 294912, 8, 512, "SAFE"),
+    ("matmul.ttir", 294911, 8, 512, "BUG FOUND")
 ]
 
 passed = 0
