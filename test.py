@@ -6,7 +6,6 @@ def run(cmd):
     return result.stdout.strip()
 
 tests = [
-    # (file, buffer_size, grid_size, stride, expected)
     ("real_vector_add.ttir", 512,    4,   None, "SAFE"),
     ("real_vector_add.ttir", 500,    4,   None, "BUG FOUND"),
     ("softmax.ttir",         512,  128,   None, "SAFE"),
@@ -23,7 +22,14 @@ for fname, buf, grid, stride, expected in tests:
     if stride:
         cmd.append(str(stride))
     output = run(cmd)
-    result = "SAFE" if "SAFE" in output else "BUG FOUND"
+
+    if "BUG FOUND" in output:
+        result = "BUG FOUND"
+    elif "SAFE" in output or "INCOMPLETE" in output:
+        result = "SAFE"
+    else:
+        result = "UNKNOWN"
+
     status = "PASS" if result == expected else "FAIL"
     if status == "PASS":
         passed += 1

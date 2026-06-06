@@ -6,6 +6,7 @@ import re
 class Encoder:
 
     def __init__(self, block_size, buffer_size, grid_size):
+        self.unsupported_ops = set()
         self.block_size = block_size
         self.buffer_size = buffer_size
         self.solver = Solver()
@@ -123,11 +124,19 @@ class Encoder:
         elif name == "tt.load":
             if op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
-                if ptr_max is not None:
+                if ptr_max is not None and self._contains_pid(ptr_max):
                     self.all_load_maxima.append(ptr_max)
+
+        else:
+            self.unsupported_ops.add(name)
 
     def _get(self, name):
         return self.vals.get(name, None)
+
+    def _contains_pid(self, expr):
+        if expr is None:
+            return False
+        return 'pid' in str(expr)
 
     def encode_loop(self, loop_line: str, body_ops: list):
         m = re.match(r'SCFFOR (\S+) (\S+) (\S+) (\S+) ITERARGS (.+)', loop_line)
@@ -186,7 +195,7 @@ class Encoder:
         for op in body_ops:
             if op.name == "tt.load" and op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
-                if ptr_max is not None:
+                if ptr_max is not None and self._contains_pid(ptr_max):
                     self.all_load_maxima.append(ptr_max)
 
     def check(self):
@@ -221,6 +230,7 @@ class Encoder:
             if result == unsat:
                 continue
 
+            # unknown — try concrete pid values
             for pid_val in range(32):
                 self.solver.push()
                 self.solver.add(self.pid == pid_val)

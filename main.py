@@ -127,11 +127,19 @@ def main():
         enc.encode(tagged[:pre_count])
         enc.encode_loop(loop_line, tagged[pre_count:])
 
+    if enc.unsupported_ops:
+        print(f"WARNING: unsupported ops skipped: {enc.unsupported_ops}")
+        print(f"         result may be incomplete for these op types")
+
     result = enc.check()
 
     print()
     if result.get("safe"):
-        print("SAFE: no out-of-bounds access possible for any program id")
+        if enc.unsupported_ops: 
+            print("INCOMPLETE: could not verify — unsupported ops present")
+            print(f"  skipped: {enc.unsupported_ops}")
+        else: 
+            print("SAFE: no out-of-bounds access possible for any program id")
     else:
         print("BUG FOUND:")
         print(f"  pid        = {result['pid']}")
