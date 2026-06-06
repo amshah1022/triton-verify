@@ -6,15 +6,17 @@ POINTER_IRRELEVANT_OPS = {
     'arith.addf', 'arith.subf', 'arith.mulf', 'arith.divf',
     'arith.maxnumf', 'arith.minnumf', 'arith.negf',
     'arith.extf', 'arith.truncf', 'arith.sitofp', 'arith.fptosi',
+    'arith.extui',
     'math.exp', 'math.log', 'math.sqrt', 'math.sin', 'math.cos',
     'tt.dot', 'tt.reduce', 'tt.scan',
     'arith.cmpi', 'arith.cmpf',
     'arith.andi', 'arith.ori', 'arith.xori',
     'arith.shli', 'arith.shrsi', 'arith.shrui',
-    }
+}
+
 
 class Encoder:
-    
+
     def __init__(self, block_size, buffer_size, grid_size, grid1_size=None):
         self.unsupported_ops = set()
         self.block_size = block_size
@@ -136,18 +138,9 @@ class Encoder:
                 ptr_max = self._get(op.operands[0] + "_max")
                 if ptr_max is not None and self._contains_pid(ptr_max):
                     self.all_load_maxima.append(ptr_max)
-        elif name == "arith.extsi":
-            # sign extension — value doesn't change, just wider type
-            # treat as identity: propagate the value as-is
-            val = self._get(op.operands[0])
-            if val is not None:
-                self.vals[res] = val
-            val_min = self._get(op.operands[0] + "_min")
-            val_max = self._get(op.operands[0] + "_max")
-            if val_min is not None:
-                self.vals[res + "_min"] = val_min
-                self.vals[res + "_max"] = val_max
-        elif name == "arith.trunci":
+
+        elif name in ("arith.extsi", "arith.trunci"):
+            # type cast — value doesn't change, propagate as-is
             val = self._get(op.operands[0])
             if val is not None:
                 self.vals[res] = val
@@ -158,7 +151,7 @@ class Encoder:
                 self.vals[res + "_max"] = val_max
 
         else:
-            if name not in POINTER_IRRELEVANT_OPS: 
+            if name not in POINTER_IRRELEVANT_OPS:
                 self.unsupported_ops.add(name)
 
     def _get(self, name):
@@ -209,9 +202,26 @@ class Encoder:
                     self.vals[loop_var + "_min"] = init_min
                     self.vals[loop_var + "_max"] = init_max
 
+        # check if any iter_args are tile pointers
+        # check if any iter_args are tile POINTERS (not just any tile value)
+        has_loop_carried_ptrs = any(
+        self._get(init_val + "_min") is not None and
+        self._contains_pid(self._get(init_val + "_max"))
+        for init_val in iter_map.values()
+        )   
+
+        # only seed k_sym for kernels without loop-carried pointers
+        # for kernels with loop-carried pointers, use num_iters * off_max approach
+        if not has_loop_carried_ptrs:
+            k_sym = BitVec(k, 32)
+            self.vals[k] = k_sym
+            self.solver.add(k_sym >= start_val)
+            self.solver.add(k_sym < stop_val)
+
         for op in body_ops:
             self._encode_op(op)
 
+        # compute final pointer maxima for loop-carried pointers
         for op in body_ops:
             if op.name == "tt.addptr" and op.is_tile:
                 ptr_operand = op.operands[0]
@@ -223,6 +233,7 @@ class Encoder:
                         final_max = init_max + num_iters * off_max
                         self.vals[ptr_operand + "_max"] = final_max
 
+        # re-check loads against final maxima
         for op in body_ops:
             if op.name == "tt.load" and op.operands:
                 ptr_max = self._get(op.operands[0] + "_max")
@@ -295,8 +306,6 @@ if __name__ == "__main__":
     enc = Encoder(block_size=128, buffer_size=512, grid_size=4)
     enc.vals["%arg0"] = BitVecVal(0, 32)
     enc.vals["%c128"] = BitVecVal(128, 32)
-    print(f"  %x_stride = {enc.vals.get('%x_stride', 'MISSING')}")
-    print(f"  %o_stride = {enc.vals.get('%o_stride', 'MISSING')}")
     enc.encode(ops)
     print(enc.check())
 

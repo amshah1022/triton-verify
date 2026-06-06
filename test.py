@@ -6,18 +6,20 @@ def run(cmd):
     return result.stdout.strip(), result.returncode
 
 tests = [
-    ("real_vector_add.ttir", 512,    4,   [],                                          "SAFE"),
-    ("real_vector_add.ttir", 500,    4,   [],                                          "BUG FOUND"),
-    ("softmax.ttir",         512,  128,   [],                                          "SAFE"),
-    ("softmax.ttir",         500,  128,   [],                                          "BUG FOUND"),
-    ("layernorm.ttir",     65536,  128,   ["512"],                                     "SAFE"),
-    ("layernorm.ttir",     60000,  128,   ["512"],                                     "BUG FOUND"),
-    ("flash_attn.ttir",    2048,    4,    ["32"],                                      "SAFE"),
-    ("flash_attn.ttir",    2000,    4,    ["32"],                                      "BUG FOUND"),
-    ("matmul.ttir",      294912,    8,    ["512"],                                     "SAFE"),
-    ("matmul.ttir",      294911,    8,    ["512"],                                     "BUG FOUND"),
-    ("swiglu.ttir",       65536,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"], "SAFE"),
-    ("swiglu.ttir",       60000,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"], "BUG FOUND"),
+    ("real_vector_add.ttir", 512,    4,   [],                                                    "SAFE"),
+    ("real_vector_add.ttir", 500,    4,   [],                                                    "BUG FOUND"),
+    ("softmax.ttir",         512,  128,   [],                                                    "SAFE"),
+    ("softmax.ttir",         500,  128,   [],                                                    "BUG FOUND"),
+    ("layernorm.ttir",     65536,  128,   ["512"],                                               "SAFE"),
+    ("layernorm.ttir",     60000,  128,   ["512"],                                               "BUG FOUND"),
+    ("flash_attn.ttir",    2048,    4,    ["stride_qm=32","stride_qk=1","stride_kn=32","stride_kk=1","stride_vn=32","stride_vk=1","stride_om=32","stride_ok=1","N_CTX=64"], "SAFE"),
+    ("flash_attn.ttir",    2000,    4,    ["stride_qm=32","stride_qk=1","stride_kn=32","stride_kk=1","stride_vn=32","stride_vk=1","stride_om=32","stride_ok=1","N_CTX=64"], "BUG FOUND"),
+    ("matmul.ttir",      294912,    8,    ["512"],                                               "SAFE"),
+    ("matmul.ttir",      294911,    8,    ["512"],                                               "BUG FOUND"),
+    ("swiglu.ttir",       65536,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "SAFE"),
+    ("swiglu.ttir",       60000,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "BUG FOUND"),
+    ("nans.ttir", 1032191, 32, ["logits_stride=32000", "vocab_size=32000"], "SAFE"),
+    ("nans.ttir", 1032190, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND")
 ]
 
 passed = 0
