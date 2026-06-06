@@ -2,9 +2,19 @@ from z3 import *
 from abstractor import TaggedOp
 import re
 
+POINTER_IRRELEVANT_OPS = {
+    'arith.addf', 'arith.subf', 'arith.mulf', 'arith.divf',
+    'arith.maxnumf', 'arith.minnumf', 'arith.negf',
+    'arith.extf', 'arith.truncf', 'arith.sitofp', 'arith.fptosi',
+    'math.exp', 'math.log', 'math.sqrt', 'math.sin', 'math.cos',
+    'tt.dot', 'tt.reduce', 'tt.scan',
+    'arith.cmpi', 'arith.cmpf',
+    'arith.andi', 'arith.ori', 'arith.xori',
+    'arith.shli', 'arith.shrsi', 'arith.shrui',
+    }
 
 class Encoder:
-
+    
     def __init__(self, block_size, buffer_size, grid_size):
         self.unsupported_ops = set()
         self.block_size = block_size
@@ -128,7 +138,8 @@ class Encoder:
                     self.all_load_maxima.append(ptr_max)
 
         else:
-            self.unsupported_ops.add(name)
+            if name not in POINTER_IRRELEVANT_OPS: 
+                self.unsupported_ops.add(name)
 
     def _get(self, name):
         return self.vals.get(name, None)

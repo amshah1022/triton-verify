@@ -3,7 +3,7 @@ import sys
 
 def run(cmd):
     result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.stdout.strip()
+    return result.stdout.strip(), result.returncode
 
 tests = [
     ("real_vector_add.ttir", 512,    4,   None, "SAFE"),
@@ -12,8 +12,8 @@ tests = [
     ("softmax.ttir",         500,  128,   None, "BUG FOUND"),
     ("layernorm.ttir",     65536,  128,    512, "SAFE"),
     ("layernorm.ttir",     60000,  128,    512, "BUG FOUND"),
-    ("flash_attn.ttir", 2048, 4, 32, "SAFE"),
-    ("flash_attn.ttir", 2000, 4, 32, "BUG FOUND")
+    ("flash_attn.ttir",    2048,    4,     32, "SAFE"),
+    ("flash_attn.ttir",    2000,    4,     32, "BUG FOUND"),
 ]
 
 passed = 0
@@ -23,9 +23,11 @@ for fname, buf, grid, stride, expected in tests:
     cmd = [sys.executable, "main.py", fname, str(buf), str(grid)]
     if stride:
         cmd.append(str(stride))
-    output = run(cmd)
+    output, returncode = run(cmd)
 
-    if "BUG FOUND" in output:
+    if returncode != 0:
+        result = "ERROR"
+    elif "BUG FOUND" in output:
         result = "BUG FOUND"
     elif "SAFE" in output or "INCOMPLETE" in output:
         result = "SAFE"
