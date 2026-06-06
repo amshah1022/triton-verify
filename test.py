@@ -12,6 +12,8 @@ tests = [
     ("softmax.ttir",         500,  128,   None, "BUG FOUND"),
     ("layernorm.ttir",     65536,  128,    512, "SAFE"),
     ("layernorm.ttir",     60000,  128,    512, "BUG FOUND"),
+    ("flash_attn.ttir", 2048, 4, 32, "SAFE"),
+    ("flash_attn.ttir", 2000, 4, 32, "BUG FOUND")
 ]
 
 passed = 0
