@@ -36,14 +36,25 @@ def extract_args(path: str) -> list:
 def main():
     if len(sys.argv) < 4:
         print("usage: python3 main.py <file.ttir> <buffer_size> <grid_size> [stride]")
-        print("example: python3 main.py kernel.ttir 512 4")
-        print("example: python3 main.py matmul.ttir 262144 64 512")
         sys.exit(1)
 
     mlir_file   = sys.argv[1]
     buffer_size = int(sys.argv[2])
     grid_size   = int(sys.argv[3])
-    stride      = int(sys.argv[4]) if len(sys.argv) > 4 else None
+    stride = None
+    stride_overrides = {}
+
+    grid1 = None 
+    for arg in sys.argv[4:]:
+        if '=' in arg:
+            k, v = arg.split('=', 1)
+            if k == 'grid1': 
+                grid1 = int(v)
+            else: 
+                stride_overrides[k] = int(v)
+        else:
+            stride = int(arg)
+
 
     # preprocess custom form → generic form
     lines = preprocess(mlir_file)
@@ -77,7 +88,7 @@ def main():
     # encode and check
     enc = Encoder(block_size=block_size,
                   buffer_size=buffer_size,
-                  grid_size=grid_size)
+                  grid_size=grid_size, grid1_size = grid1)
 
     # seed function arguments
     args = extract_args(mlir_file)
@@ -85,9 +96,12 @@ def main():
 
     for arg in args:
         arg_name = f'%{arg}'
+        print(f"  seeding arg={arg} in_overrides={arg in stride_overrides}")
         if 'ptr' in arg.lower():
             # base pointers always 0
             enc.vals[arg_name] = BitVecVal(0, 32)
+        elif arg in stride_overrides: 
+            enc.vals[arg_name] = BitVecVal(stride_overrides[arg], 32)
         elif stride is not None and 'stride' in arg.lower():
             # use provided stride for all stride args
             enc.vals[arg_name] = BitVecVal(stride, 32)

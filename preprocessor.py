@@ -106,7 +106,13 @@ def custom_to_generic(line: str) -> str:
         result, k, start, stop, step, iter_args = m.groups()
         return f'SCFFOR {k} {start} {stop} {step} ITERARGS {iter_args}'
 
-    return None
+    # arith.extsi / arith.trunci — type extension/truncation, value passthrough
+    # arith.extsi / arith.trunci / arith.extui
+    m = re.match(r'(%\w+)\s*=\s*arith\.(extsi|trunci|extui)\s+(%\w+)\s*:\s*(\S+)\s+to\s+(\S+)', line)
+    if m:
+        name, op, operand, in_type, out_type = m.groups()
+        return f'{name} = "arith.{op}"({operand}) : ({in_type}) -> {out_type}'
+    return None 
 
 
 def preprocess(path: str) -> list:

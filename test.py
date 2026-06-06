@@ -6,25 +6,25 @@ def run(cmd):
     return result.stdout.strip(), result.returncode
 
 tests = [
-    ("real_vector_add.ttir", 512,    4,   None, "SAFE"),
-    ("real_vector_add.ttir", 500,    4,   None, "BUG FOUND"),
-    ("softmax.ttir",         512,  128,   None, "SAFE"),
-    ("softmax.ttir",         500,  128,   None, "BUG FOUND"),
-    ("layernorm.ttir",     65536,  128,    512, "SAFE"),
-    ("layernorm.ttir",     60000,  128,    512, "BUG FOUND"),
-    ("flash_attn.ttir",    2048,    4,     32, "SAFE"),
-    ("flash_attn.ttir",    2000,    4,     32, "BUG FOUND"),
-    ("matmul.ttir", 294912, 8, 512, "SAFE"),
-    ("matmul.ttir", 294911, 8, 512, "BUG FOUND")
+    ("real_vector_add.ttir", 512,    4,   [],                                          "SAFE"),
+    ("real_vector_add.ttir", 500,    4,   [],                                          "BUG FOUND"),
+    ("softmax.ttir",         512,  128,   [],                                          "SAFE"),
+    ("softmax.ttir",         500,  128,   [],                                          "BUG FOUND"),
+    ("layernorm.ttir",     65536,  128,   ["512"],                                     "SAFE"),
+    ("layernorm.ttir",     60000,  128,   ["512"],                                     "BUG FOUND"),
+    ("flash_attn.ttir",    2048,    4,    ["32"],                                      "SAFE"),
+    ("flash_attn.ttir",    2000,    4,    ["32"],                                      "BUG FOUND"),
+    ("matmul.ttir",      294912,    8,    ["512"],                                     "SAFE"),
+    ("matmul.ttir",      294911,    8,    ["512"],                                     "BUG FOUND"),
+    ("swiglu.ttir",       65536,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"], "SAFE"),
+    ("swiglu.ttir",       60000,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"], "BUG FOUND"),
 ]
 
 passed = 0
 failed = 0
 
-for fname, buf, grid, stride, expected in tests:
-    cmd = [sys.executable, "main.py", fname, str(buf), str(grid)]
-    if stride:
-        cmd.append(str(stride))
+for fname, buf, grid, extra_args, expected in tests:
+    cmd = [sys.executable, "main.py", fname, str(buf), str(grid)] + extra_args
     output, returncode = run(cmd)
 
     if returncode != 0:
@@ -42,6 +42,3 @@ for fname, buf, grid, stride, expected in tests:
     else:
         failed += 1
     print(f"{status}  {fname:<25} buf={buf:<8} expected={expected:<10} got={result}")
-
-print()
-print(f"{passed}/{passed+failed} tests passed")

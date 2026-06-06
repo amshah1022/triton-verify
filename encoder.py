@@ -15,7 +15,7 @@ POINTER_IRRELEVANT_OPS = {
 
 class Encoder:
     
-    def __init__(self, block_size, buffer_size, grid_size):
+    def __init__(self, block_size, buffer_size, grid_size, grid1_size=None):
         self.unsupported_ops = set()
         self.block_size = block_size
         self.buffer_size = buffer_size
@@ -28,7 +28,7 @@ class Encoder:
         self.solver.add(self.pid >= 0)
         self.solver.add(self.pid < grid_size)
         self.solver.add(self.pid1 >= 0)
-        self.solver.add(self.pid1 < grid_size)
+        self.solver.add(self.pid1 < (grid1_size if grid1_size is not None else grid_size))
         self.vals = {}
 
     def encode(self, ops):
@@ -136,6 +136,26 @@ class Encoder:
                 ptr_max = self._get(op.operands[0] + "_max")
                 if ptr_max is not None and self._contains_pid(ptr_max):
                     self.all_load_maxima.append(ptr_max)
+        elif name == "arith.extsi":
+            # sign extension — value doesn't change, just wider type
+            # treat as identity: propagate the value as-is
+            val = self._get(op.operands[0])
+            if val is not None:
+                self.vals[res] = val
+            val_min = self._get(op.operands[0] + "_min")
+            val_max = self._get(op.operands[0] + "_max")
+            if val_min is not None:
+                self.vals[res + "_min"] = val_min
+                self.vals[res + "_max"] = val_max
+        elif name == "arith.trunci":
+            val = self._get(op.operands[0])
+            if val is not None:
+                self.vals[res] = val
+            val_min = self._get(op.operands[0] + "_min")
+            val_max = self._get(op.operands[0] + "_max")
+            if val_min is not None:
+                self.vals[res + "_min"] = val_min
+                self.vals[res + "_max"] = val_max
 
         else:
             if name not in POINTER_IRRELEVANT_OPS: 
@@ -275,6 +295,8 @@ if __name__ == "__main__":
     enc = Encoder(block_size=128, buffer_size=512, grid_size=4)
     enc.vals["%arg0"] = BitVecVal(0, 32)
     enc.vals["%c128"] = BitVecVal(128, 32)
+    print(f"  %x_stride = {enc.vals.get('%x_stride', 'MISSING')}")
+    print(f"  %o_stride = {enc.vals.get('%o_stride', 'MISSING')}")
     enc.encode(ops)
     print(enc.check())
 
