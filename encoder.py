@@ -22,7 +22,6 @@ class Encoder:
         self.block_size = block_size
         self.buffer_size = buffer_size
         self.solver = Solver()
-        self.load_ptr_max = None
         self.all_load_maxima = []
         self.pid = BitVec('pid', 32)
         self.pid1 = BitVec('pid1', 32)
@@ -287,8 +286,6 @@ class Encoder:
 
     def check(self):
         candidates = self.all_load_maxima[:]
-        if self.load_ptr_max is not None:
-            candidates.append(self.load_ptr_max)
 
         if not candidates:
             return {"safe": True, "reason": "no load found"}
