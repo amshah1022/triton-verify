@@ -131,6 +131,12 @@ def main():
                 name, val = m.groups()
                 enc.vals[name + "_min"] = BitVecVal(int(val), 32)
                 enc.vals[name + "_max"] = BitVecVal(int(val), 32)
+    
+    # seed unrolled loop variables as 0
+    for line in lines:
+        if '(%i)' in line or '(%i,' in line:
+            enc.vals['%i'] = BitVecVal(0, 32)
+            break
 
     # encode — split at loop boundary if present
     if loop_line is None:
