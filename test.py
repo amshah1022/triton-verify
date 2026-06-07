@@ -26,6 +26,8 @@ tests = [
     ("qkv.ttir", 3000, 4, ["stride_xs=256","stride_xh=64","stride_xd=1","stride_ys=256","stride_yh=64","stride_yd=1","num_heads=4","n_rows=64","n_cols=64","n_cols_padded=64","grid1=1"], "BUG FOUND"),
     ("swizzle.ttir", 4096, 2, ["input_row_stride=64","scale_rows=64","scale_cols=64","grid1=2"], "SAFE"),
     ("swizzle.ttir", 3000, 2, ["input_row_stride=64","scale_rows=64","scale_cols=64","grid1=2"], "BUG FOUND"),
+    ("relu2.ttir", 16384, 32, ["X_stride=512", "Y_stride=512", "n_cols=512"], "SAFE"),
+    ("relu2.ttir", 15000, 32, ["X_stride=512", "Y_stride=512", "n_cols=512"], "BUG FOUND"),
 ]
 
 passed = 0
