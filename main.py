@@ -96,7 +96,6 @@ def main():
 
     for arg in args:
         arg_name = f'%{arg}'
-        print(f"  seeding arg={arg} in_overrides={arg in stride_overrides}")
         if 'ptr' in arg.lower():
             # base pointers always 0
             enc.vals[arg_name] = BitVecVal(0, 32)

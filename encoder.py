@@ -11,7 +11,8 @@ POINTER_IRRELEVANT_OPS = {
     'tt.dot', 'tt.reduce', 'tt.scan',
     'arith.cmpi', 'arith.cmpf',
     'arith.andi', 'arith.ori', 'arith.xori',
-    'arith.shli', 'arith.shrsi', 'arith.shrui',
+    'arith.shli', 'arith.shrsi', 'arith.shrui', 'arith.divsi', 'arith.remsi', 'arith.maxsi', 'arith.minsi', 'arith.subi',
+'arith.divui', 'arith.remui'
 }
 
 

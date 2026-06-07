@@ -19,7 +19,9 @@ tests = [
     ("swiglu.ttir",       65536,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "SAFE"),
     ("swiglu.ttir",       60000,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "BUG FOUND"),
     ("nans.ttir", 1032191, 32, ["logits_stride=32000", "vocab_size=32000"], "SAFE"),
-    ("nans.ttir", 1032190, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND")
+    ("nans.ttir", 1032190, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND"),
+    ("dcp.ttir", 32, 1, [], "SAFE"),
+    ("dcp.ttir", 16, 1, [], "BUG FOUND")
 ]
 
 passed = 0
