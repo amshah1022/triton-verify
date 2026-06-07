@@ -261,6 +261,15 @@ class Encoder:
             self.vals[k] = k_sym
             self.solver.add(k_sym >= start_val)
             self.solver.add(k_sym < stop_val)
+            if hasattr(stop_val, 'as_long') and hasattr(start_val, 'as_long') and hasattr(step_val, 'as_long'):
+                n_iters = (stop_val.as_long() - start_val.as_long() + step_val.as_long() - 1) // step_val.as_long()
+                if n_iters == 1:
+                    # only one iteration, k_sym must equal start
+                    self.solver.add(k_sym == start_val)
+                else:
+                    # multiple iterations, k is a multiple of step
+                    last_iter_start = start_val.as_long() + (n_iters - 1) * step_val.as_long()
+                    self.solver.add(k_sym <= BitVecVal(last_iter_start, 32))
 
         for op in body_ops:
             self._encode_op(op)

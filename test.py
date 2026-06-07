@@ -18,8 +18,8 @@ tests = [
     ("matmul.ttir",      294911,    8,    ["512"],                                               "BUG FOUND"),
     ("swiglu.ttir",       65536,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "SAFE"),
     ("swiglu.ttir",       60000,   32,    ["x_stride=2048", "o_stride=1024", "grid1=1"],         "BUG FOUND"),
-    ("nans.ttir", 1032191, 32, ["logits_stride=32000", "vocab_size=32000"], "SAFE"),
-    ("nans.ttir", 1032190, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND"),
+    ("nans.ttir", 1024768, 32, ["logits_stride=32000", "vocab_size=32000"], "SAFE"),
+    ("nans.ttir", 1024767, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND"),
     ("dcp.ttir", 32, 1, [], "SAFE"),
     ("dcp.ttir", 16, 1, [], "BUG FOUND"),
     ("qkv.ttir", 4096, 4, ["stride_xs=256","stride_xh=64","stride_xd=1","stride_ys=256","stride_yh=64","stride_yd=1","num_heads=4","n_rows=64","n_cols=64","n_cols_padded=64","grid1=1"], "SAFE"),
@@ -31,7 +31,9 @@ tests = [
     ("geglu.ttir", 16384, 32, ["stride=512", "n_cols=512"], "SAFE"),
     ("geglu.ttir", 15000, 32, ["stride=512", "n_cols=512"], "BUG FOUND"),
     ("jsd.ttir", 16384, 32, ["X_stride=512", "Y_stride=512", "loss_stride=1", "n_cols=512"], "SAFE"),
-    ("jsd.ttir", 15000, 32, ["X_stride=512", "Y_stride=512", "loss_stride=1", "n_cols=512"], "BUG FOUND")
+    ("jsd.ttir", 15000, 32, ["X_stride=512", "Y_stride=512", "loss_stride=1", "n_cols=512"], "BUG FOUND"),
+    ("kldiv.ttir", 16384, 32, ["y_stride=512", "gt_stride=512", "loss_stride=1", "n_cols=512"], "SAFE"),
+    ("kldiv.ttir", 15000, 32, ["y_stride=512", "gt_stride=512", "loss_stride=1", "n_cols=512"], "BUG FOUND")
 ]
 
 passed = 0

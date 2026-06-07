@@ -119,9 +119,11 @@ def main():
     # seed constants from arith.constant result names
     for op in tagged:
         if op.name == "arith.constant" and op.results:
-            m = re.search(r'(\d+)', op.results[0])
-            if m:
-                enc.vals[op.results[0]] = BitVecVal(int(m.group(1)), 32)
+            name = op.results[0]
+            if re.match(r'%c\d+', name): 
+                m = re.search(r'(\d+)', name)
+                if m:
+                    enc.vals[name] = BitVecVal(int(m.group(1)), 32)
 
     # seed dense tensor constants
     with open(mlir_file) as f:
