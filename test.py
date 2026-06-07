@@ -28,6 +28,8 @@ tests = [
     ("swizzle.ttir", 3000, 2, ["input_row_stride=64","scale_rows=64","scale_cols=64","grid1=2"], "BUG FOUND"),
     ("relu2.ttir", 16384, 32, ["X_stride=512", "Y_stride=512", "n_cols=512"], "SAFE"),
     ("relu2.ttir", 15000, 32, ["X_stride=512", "Y_stride=512", "n_cols=512"], "BUG FOUND"),
+    ("geglu.ttir", 16384, 32, ["stride=512", "n_cols=512"], "SAFE"),
+    ("geglu.ttir", 15000, 32, ["stride=512", "n_cols=512"], "BUG FOUND"),
 ]
 
 passed = 0
