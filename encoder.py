@@ -334,30 +334,3 @@ class Encoder:
         return {"safe": True}
 
 
-if __name__ == "__main__":
-
-    ops = [
-        TaggedOp("tt.get_program_id", ["%0"], [],              "i32",                     False, 0),
-        TaggedOp("arith.muli",        ["%1"], ["%0", "%c128"], "i32",                     False, 0),
-        TaggedOp("tt.make_range",     ["%2"], [],              "tensor<128xi32>",          True,  128),
-        TaggedOp("tt.splat",          ["%3"], ["%1"],          "tensor<128xi32>",          True,  128),
-        TaggedOp("arith.addi",        ["%4"], ["%3", "%2"],    "tensor<128xi32>",          True,  128),
-        TaggedOp("tt.splat",          ["%7"], ["%arg0"],       "tensor<128x!tt.ptr<f32>>", True,  128),
-        TaggedOp("tt.addptr",         ["%8"], ["%7", "%4"],    "tensor<128x!tt.ptr<f32>>", True,  128),
-        TaggedOp("tt.load",           ["%9"], ["%8"],          "tensor<128xf32>",          True,  128),
-    ]
-
-    print("=== TEST 1: safe (512 elements, 4 blocks) ===")
-    enc = Encoder(block_size=128, buffer_size=512, grid_size=4)
-    enc.vals["%arg0"] = BitVecVal(0, 32)
-    enc.vals["%c128"] = BitVecVal(128, 32)
-    enc.encode(ops)
-    print(enc.check())
-
-    print()
-    print("=== TEST 2: buggy (500 elements, 4 blocks) ===")
-    enc2 = Encoder(block_size=128, buffer_size=500, grid_size=4)
-    enc2.vals["%arg0"] = BitVecVal(0, 32)
-    enc2.vals["%c128"] = BitVecVal(128, 32)
-    enc2.encode(ops)
-    print(enc2.check())
