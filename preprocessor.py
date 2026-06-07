@@ -24,10 +24,11 @@ def custom_to_generic(line: str) -> str:
         return f'{name} = "arith.constant"() {{value = {val} : {typ}}} : () -> {typ}'
 
     # tt.get_program_id
-    m = re.match(r'(%\w+)\s*=\s*tt\.get_program_id\s+\w+\s*:\s*(\S+)', line)
+    m = re.match(r'(%\w+)\s*=\s*tt\.get_program_id\s+(\w+)\s*:\s*(\S+)', line)
     if m:
-        name, typ = m.groups()
-        return f'{name} = "tt.get_program_id"() {{axis = 0 : i32}} : () -> {typ}'
+        name, axis, typ = m.groups()
+        axis_num = 0 if axis == 'x' else 1
+        return f'{name} = "tt.get_program_id"() {{axis = {axis_num} : i32}} : () -> {typ}'
 
     # tt.make_range
     m = re.match(r'(%\w+)\s*=\s*tt\.make_range\s+\{end\s*=\s*(\d+)\s*:\s*i32,\s*start\s*=\s*(\d+)\s*:\s*i32\}\s*:\s*(.+)', line)

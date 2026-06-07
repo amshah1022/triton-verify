@@ -21,7 +21,9 @@ tests = [
     ("nans.ttir", 1032191, 32, ["logits_stride=32000", "vocab_size=32000"], "SAFE"),
     ("nans.ttir", 1032190, 32, ["logits_stride=32000", "vocab_size=32000"], "BUG FOUND"),
     ("dcp.ttir", 32, 1, [], "SAFE"),
-    ("dcp.ttir", 16, 1, [], "BUG FOUND")
+    ("dcp.ttir", 16, 1, [], "BUG FOUND"),
+    ("qkv.ttir", 4096, 4, ["stride_xs=256","stride_xh=64","stride_xd=1","stride_ys=256","stride_yh=64","stride_yd=1","num_heads=4","n_rows=64","n_cols=64","n_cols_padded=64","grid1=1"], "SAFE"),
+    ("qkv.ttir", 3000, 4, ["stride_xs=256","stride_xh=64","stride_xd=1","stride_ys=256","stride_yh=64","stride_yd=1","num_heads=4","n_rows=64","n_cols=64","n_cols_padded=64","grid1=1"], "BUG FOUND"),
 ]
 
 passed = 0

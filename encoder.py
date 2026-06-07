@@ -11,8 +11,7 @@ POINTER_IRRELEVANT_OPS = {
     'tt.dot', 'tt.reduce', 'tt.scan',
     'arith.cmpi', 'arith.cmpf',
     'arith.andi', 'arith.ori', 'arith.xori',
-    'arith.shli', 'arith.shrsi', 'arith.shrui', 'arith.divsi', 'arith.remsi', 'arith.maxsi', 'arith.minsi', 'arith.subi',
-'arith.divui', 'arith.remui'
+    'arith.shli', 'arith.shrsi', 'arith.shrui', 'arith.maxsi', 'arith.minsi'
 }
 
 
@@ -66,6 +65,51 @@ class Encoder:
                 b = self._get(op.operands[1])
                 if a is not None and b is not None:
                     self.vals[res] = a * b
+
+        elif name in ("arith.divsi", "arith.divui"):
+            if op.is_tile:
+                a_min = self._get(op.operands[0] + "_min")
+                a_max = self._get(op.operands[0] + "_max")
+                b_min = self._get(op.operands[1] + "_min")
+                b_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [a_min, a_max, b_min, b_max]):
+                    self.vals[res + "_min"] = a_min / b_max
+                    self.vals[res + "_max"] = a_max / b_min
+            else:
+                a = self._get(op.operands[0])
+                b = self._get(op.operands[1])
+                if a is not None and b is not None:
+                    self.vals[res] = a / b
+
+        elif name in ("arith.remsi", "arith.remui"):
+            if op.is_tile:
+                a_min = self._get(op.operands[0] + "_min")
+                a_max = self._get(op.operands[0] + "_max")
+                b_min = self._get(op.operands[1] + "_min")
+                b_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [a_min, a_max, b_min, b_max]):
+                    self.vals[res + "_min"] = BitVecVal(0, 32)
+                    self.vals[res + "_max"] = b_max - BitVecVal(1, 32)
+            else:
+                a = self._get(op.operands[0])
+                b = self._get(op.operands[1])
+                if a is not None and b is not None:
+                    self.vals[res] = a % b
+
+        elif name == "arith.subi":
+            if op.is_tile:
+                a_min = self._get(op.operands[0] + "_min")
+                a_max = self._get(op.operands[0] + "_max")
+                b_min = self._get(op.operands[1] + "_min")
+                b_max = self._get(op.operands[1] + "_max")
+                if all(x is not None for x in [a_min, a_max, b_min, b_max]):
+                    self.vals[res + "_min"] = a_min - b_max
+                    self.vals[res + "_max"] = a_max - b_min
+            else:
+                a = self._get(op.operands[0])
+                b = self._get(op.operands[1])
+                if a is not None and b is not None:
+                    self.vals[res] = a - b
 
         elif name == "arith.addi":
             if op.is_tile:
